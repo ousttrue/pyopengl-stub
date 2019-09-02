@@ -1,0 +1,2 @@
+# pyopengl-stub
+experimental pyi
