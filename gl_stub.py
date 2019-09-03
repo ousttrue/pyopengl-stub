@@ -1,5 +1,6 @@
 import requests
 import pathlib
+import shutil
 from typing import Dict, Tuple, List, Optional
 import xml.etree.ElementTree as ET
 HERE = pathlib.Path(__file__).absolute().parent
@@ -20,6 +21,9 @@ class Command:
         name = e.find('proto/name')
         if name is not None and name.text:
             self.name = name.text
+
+    def __str__(self):
+        return f'def {self.name}(): ...'
 
 
 class Definition:
@@ -60,8 +64,7 @@ class Definition:
         command = Command(e)
         self.commands[command.name] = command
 
-    def process_feature(self, name, api, number, e: ET.Element):
-        print(f'{name} {api} {number}')
+    def process_feature(self, f, e: ET.Element):
         for x in list(e):
             name = x.get('name')
             if name:
@@ -69,40 +72,57 @@ class Definition:
                     for k, v in self.enums.items():
                         for y in v:
                             if y[0] == name:
-                                print(y)
+                                f.write(f'{y[0]} = {y[1]}\n')
                 elif x.tag == 'command':
                     command = self.commands[name]
-                    print(command)
+                    f.write(f'{command}\n')
                 elif x.tag == 'type':
                     t = self.types[name]
-                    print(t)
+                    f.write(f'# {name} = {t}\n')
                 else:
                     raise Exception(f'unknown tag: {x.tag}')
 
-    def generate(self, root: ET.Element):
+    def generate(self, dst: pathlib.Path, root: ET.Element):
+        dst.mkdir(parents=True, exist_ok=True)
+
+        def get_pyi(api, major, minor):
+            return f'{api.upper()}_{major}_{minor}.pyi'
+
         for e in root.findall('feature'):
             name = e.get("name")
-            if name:
-                api = e.get("api")
-                if api:
-                    number = e.get("number")
-                    if number:
-                        r = e.find('require')
-                        if r:
-                            self.process_feature(name, api, number, r)
+            api = e.get("api")
+            number = e.get("number")
+            r = e.find('require')
+            if name and api == 'gl' and number and r:
+                print(f'{name} {api} {number}')
+                with (dst / get_pyi(api, *number.split('.'))).open('w') as f:
+                    self.process_feature(f, r)
 
 
 def main() -> None:
+    '''
+    OpenGL
+     + GL
+        + VERSION
+            + GL_1_0.pyi
+    '''
+
     xml_file: pathlib.Path = (HERE / 'gl.xml')
     if not xml_file.exists():
         print(f'download: {GL_XML_URL}')
         r = requests.get(GL_XML_URL)
         with xml_file.open('w') as f:
             f.write(r.text)
+            f.write('\n')
 
     root = ET.fromstring(xml_file.read_text())
     definition = Definition(root)
-    definition.generate(root)
+
+    dst: pathlib.Path = (HERE / 'out/OpenGL')
+    if dst.exists():
+        shutil.rmtree(dst)
+
+    definition.generate(dst / 'VERSION', root)
 
 
 if __name__ == '__main__':
